@@ -20,7 +20,16 @@
 参数文件`motor_config.h`只存参数，不执行动作。
 
 阅读时先打开`main.c`，再进入`MotorControl_Init()`和`RunMotorState()`。
-需要理解PWM关系时，顺着`SetMotorVector()` → `MotorDriver_SetVector()` → `MotorPwmCalculate()`往下看。
+需要理解PWM关系时，直接看`SetMotorVector()`里的两步：
+
+```text
+SetMotorVector(angle, volts)
+  1. MotorPwmCalculate(...)：算出 U/V/W 三个比较值
+  2. MotorDriver_SetPwm(u, v, w)：直接写入 TIM2 三路 CCR
+```
+
+停止时先关闭驱动，再调用`MotorDriver_SetPwm(900, 900, 900)`恢复三路50%。
+写PWM统一使用这一个接口，原先的`SetNeutral()`和`MotorDriver_SetVector()`转发层已去掉。
 
 一次1ms更新的顺序是：
 
@@ -104,6 +113,10 @@ SVPWM数学部分此前已通过21600组矢量数值检查。本次模块拆分�
 对照覆盖正常试转、采样零点与错误、正负电流和推算U相超限、各阶段使能清零、
 停止后不重启、计时阈值、配置不匹配及启动失败；每1ms的状态、电流和PWM观察值一致。
 主机对照不测量STM32实机执行耗时。本次未替用户下载，实机结果仍需用户手动下载确认。
+
+PWM接口精简后再次通过上述36组对照，每1ms的状态、电流和三路比较值与原版一致，
+ARM固件编译通过。精简前源码、ELF和本次对照记录保存在
+`D:/PCB/bringup-foc1-20261018-223611-pwm-simplify/`。
 
 固定定位版本、原ELF及测试记录备份在D:/PCB/bringup-foc1-20261018-openloop/。
 本次拆分前的源码、ELF及主机对照记录在D:/PCB/bringup-foc1-20261018-modules-145530/。

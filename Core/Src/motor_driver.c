@@ -1,6 +1,5 @@
 #include "motor_driver.h"
 #include "motor_config.h"
-#include "motor_pwm.h"
 #include "main.h"
 #include "tim.h"
 
@@ -13,9 +12,10 @@ volatile uint32_t live_pwm_u_ccr = MOTOR_TEST_NEUTRAL_CCR;
 volatile uint32_t live_pwm_v_ccr = MOTOR_TEST_NEUTRAL_CCR;
 volatile uint32_t live_pwm_w_ccr = MOTOR_TEST_NEUTRAL_CCR;
 
-/* 只有这个函数实际写 TIM2 的三路 CCR，并同步 Live Watch 显示值。
- * 当前占空比约为 CCR/1800。CCR 预装载的新值在定时器更新事件装入生效寄存器。 */
-static void WriteCompare(uint16_t u, uint16_t v, uint16_t w)
+/* 直接设置 U/V/W 三路 PWM，并同步 Live Watch 显示值，不再另套转发函数。
+ * u/v/w 是比较值，范围 0~1800，不是百分比；例如 900 表示 50%。
+ * 占空比约为 CCR/1800，预装载的新值在定时器更新事件装入生效寄存器。 */
+void MotorDriver_SetPwm(uint16_t u, uint16_t v, uint16_t w)
 {
   __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, u);
   __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, v);
@@ -46,11 +46,6 @@ bool MotorDriver_IsEnabled(void)
   return (GPIOA->ODR & GPIO_PIN_3) != 0U;
 }
 
-void MotorDriver_SetNeutral(void)
-{
-  WriteCompare(MOTOR_TEST_NEUTRAL_CCR, MOTOR_TEST_NEUTRAL_CCR, MOTOR_TEST_NEUTRAL_CCR);
-}
-
 bool MotorDriver_Init(void)
 {
   MotorDriver_Disable();
@@ -70,16 +65,4 @@ bool MotorDriver_CheckConfiguration(void)
 {
   return htim2.Init.Period == MOTOR_PWM_PERIOD && htim2.Init.Prescaler == 0U &&
          htim2.Init.CounterMode == TIM_COUNTERMODE_CENTERALIGNED1;
-}
-
-bool MotorDriver_SetVector(float angle_rad, float volts)
-{
-  uint16_t compare[3];
-  /* 纯数学部分在 motor_pwm.c；本文件只负责把结果交给硬件。 */
-  if (!MotorPwmCalculate(angle_rad, volts, MOTOR_TEST_BUS_VOLTS, MOTOR_PWM_PERIOD, compare))
-  {
-    return false;
-  }
-  WriteCompare(compare[0], compare[1], compare[2]);
-  return true;
 }

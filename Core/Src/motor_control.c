@@ -1,6 +1,7 @@
 #include "motor_control.h"
 #include "motor_config.h"
 #include "motor_driver.h"
+#include "motor_pwm.h"
 #include "current_sense.h"
 #include "main.h"
 #include "tim.h"
@@ -27,18 +28,23 @@ void MotorControl_Stop(MotorFault fault)
 {
   /* 先关闭半桥，再恢复三路 50%；关闭后不再主动保持轴的位置。 */
   MotorDriver_Disable();
-  MotorDriver_SetNeutral();
+  MotorDriver_SetPwm(MOTOR_TEST_NEUTRAL_CCR, MOTOR_TEST_NEUTRAL_CCR, MOTOR_TEST_NEUTRAL_CCR);
   motor_test_fault = fault;
   motor_test_state = (fault == MOTOR_FAULT_NONE) ? MOTOR_STATE_COMPLETE : MOTOR_STATE_FAULT;
 }
 
 static void SetMotorVector(float angle, float volts)
 {
-  if (!MotorDriver_SetVector(angle, volts))
+  uint16_t compare[3];
+  /* 第一步：用方向和幅值算出 U/V/W 三路比较值；公式在 motor_pwm.c。
+   * 例如 angle=0、volts=0.3 时，得到约 [934,866,866]。 */
+  if (!MotorPwmCalculate(angle, volts, MOTOR_TEST_BUS_VOLTS, MOTOR_PWM_PERIOD, compare))
   {
     MotorControl_Stop(MOTOR_FAULT_CONFIG);
     return;
   }
+  /* 第二步：把三个比较值写入 TIM2 的三路 CCR，更新实际占空比。 */
+  MotorDriver_SetPwm(compare[0], compare[1], compare[2]);
   /* 弧度换成千分之一度，只供 Live Watch 观察；90000 表示 90 电角度。 */
   motor_command_angle_mdeg = (uint32_t)(angle * (360000.0f / MOTOR_TEST_TWO_PI));
 }
@@ -105,7 +111,7 @@ static void RunMotorState(void)
     /* 转动的核心：delta_angle = 2*pi * 电频率 * 0.001秒 * 加减速比例。
      * 匀速时每 1ms 推进 0.00314rad=0.18 电角度，2 秒走完一个电角度周期。
      * 7 极对电机跟随时，机械角度=电角度/7。本版累计指令机械角度约 100 度。
-     * 每次给新方向，驱动层计算并写入一组三路 PWM，形成缓慢旋转的电压矢量。
+     * 每次给新方向，SetMotorVector() 先计算三路 PWM，再交给驱动模块写入 TIM2。
      */
     motor_field_angle += MOTOR_TEST_TWO_PI * MOTOR_TEST_ELECTRICAL_HZ * 0.001f * factor;
     /* 2*pi 与 0 的方向相同，走完一圈后回绕，避免角度无限增大。 */

@@ -3,7 +3,7 @@
 
 /*
  * 这个文件只做“指令方向 -> 三路 PWM 比较值”的数学换算，不操作外设寄存器。
- * 调用者 motor_driver.c 把这里的 compare[0/1/2] 写入 TIM2，才会改变实际引脚波形。
+ * motor_control.c 取得 compare[0/1/2] 后，调用 MotorDriver_SetPwm() 写入 TIM2，才会改变实际引脚波形。
  *
  * 两个输入描述一个电压矢量：
  * - angle_rad：它在定子平面内指向哪里（电角度，rad）。
