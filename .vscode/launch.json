@@ -1,0 +1,34 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "STM32F103C8 - Live Watch (ST-Link)",
+            "type": "cortex-debug",
+            "request": "launch",
+            "cwd": "${workspaceFolder}",
+            "servertype": "openocd",
+            "executable": "${workspaceFolder}/build/Debug/foc1.elf",
+            "device": "STM32F103C8",
+            "configFiles": [
+                "interface/stlink.cfg",
+                "target/stm32f1x.cfg",
+                "${workspaceFolder}/debug/motor-test.cfg"
+            ],
+            "searchDir": [
+                "C:/Users/30952/.eide/tools/openocd_7a1adfbec_mingw32/share/openocd/scripts"
+            ],
+            "serverpath": "C:/Users/30952/.eide/tools/openocd_7a1adfbec_mingw32/bin/openocd.exe",
+            "gdbPath": "C:/Users/30952/.eide/tools/gcc_arm/bin/arm-none-eabi-gdb.exe",
+            "armToolchainPath": "C:/Users/30952/.eide/tools/gcc_arm/bin",
+            "openOCDLaunchCommands": [
+                "adapter speed 100"
+            ],
+            "preLaunchTask": "build",
+            "runToEntryPoint": "main",
+            "liveWatch": {
+                "enabled": true,
+                "samplesPerSecond": 4
+            }
+        }
+    ]
+}

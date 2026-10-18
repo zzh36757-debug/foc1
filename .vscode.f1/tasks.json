@@ -1,0 +1,37 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "configure Debug",
+            "type": "process",
+            "command": "C:/Users/30952/tools/cmake/bin/cmake.exe",
+            "args": ["--preset", "Debug"],
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "env": {
+                    "PATH": "C:/Users/30952/.eide/tools/gcc_arm/bin;C:/Users/30952/tools/ninja;C:/Users/30952/tools/cmake/bin;${env:PATH}"
+                }
+            },
+            "problemMatcher": ["$gcc"]
+        },
+        {
+            "label": "build",
+            "type": "process",
+            "command": "C:/Users/30952/tools/cmake/bin/cmake.exe",
+            "args": ["--build", "--preset", "Debug"],
+            "dependsOn": ["configure Debug"],
+            "dependsOrder": "sequence",
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "env": {
+                    "PATH": "C:/Users/30952/.eide/tools/gcc_arm/bin;C:/Users/30952/tools/ninja;C:/Users/30952/tools/cmake/bin;${env:PATH}"
+                }
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": ["$gcc"]
+        }
+    ]
+}

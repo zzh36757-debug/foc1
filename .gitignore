@@ -1,0 +1,68 @@
+# STM32 / CubeMX + CMake 工程
+# 保留 Core/、Drivers/、cmake/、debug/、*.ioc、启动文件和链接脚本。
+# .vscode/ 的构建/调试配置和 .vscode.f1/ 的复用模板也保留。
+
+# 构建输出目录
+/build/
+/cmake-build-*/
+# 不整体忽略 Debug/：Windows 下可能误伤 debug/ 中的 OpenOCD 配置。
+
+# 编译、链接、烧录产物和编译器分析结果
+*.o
+*.obj
+*.a
+*.d
+*.su
+*.cyclo
+*.elf
+*.axf
+*.hex
+*.bin
+*.map
+*.lst
+*.list
+
+# CMake / Ninja 可再生成的缓存与构建文件
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+DartConfiguration.tcl
+/Testing/
+build.ninja
+rules.ninja
+.ninja_deps
+.ninja_log
+compile_commands.json
+
+# 个人 CMake 预设；公共的 CMakePresets.json 保留
+CMakeUserPresets.json
+
+# CubeMX 上次生成的文件清单；工程配置以 foc1.ioc 为准
+/.mxproject
+
+# 编辑器与语言服务器缓存；不忽略整个 .vscode 目录
+.cache/
+.clangd/
+ipch/
+.vs/
+/.vscode/*.db*
+/.vscode/*.local.json
+
+# 日志、临时文件、备份及 Python 缓存
+*.log
+*.tmp
+*.temp
+*.bak
+*.orig
+*.rej
+*~
+*.swp
+*.swo
+__pycache__/
+*.py[cod]
+
+# 操作系统生成的文件
+.DS_Store
+Thumbs.db
+Desktop.ini
