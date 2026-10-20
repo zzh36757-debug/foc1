@@ -65,7 +65,7 @@ static void RunMotorState(void)
   }
   else if (motor_test_state == MOTOR_STATE_ALIGN_RAMP)
   {
-    /* 1 定位升幅：方向固定为 0rad，0.6 秒内从 0 升到 0.3V。
+    /* 1 定位升幅：方向固定为 0rad，0.6 秒内从 0 升到配置的电压幅值。
      * 先让转子靠近一个固定磁场方向，再开始旋转；此时没有编码器确认到位。 */
     uint32_t ramp_ms = motor_test_step_ms;
     if (ramp_ms > MOTOR_TEST_RAMP_MS) { ramp_ms = MOTOR_TEST_RAMP_MS; }
@@ -93,7 +93,7 @@ static void RunMotorState(void)
     float volts = MOTOR_TEST_VECTOR_VOLTS;
     if (motor_test_state == MOTOR_STATE_ROTATE)
     {
-      /* 5 旋转：前 500ms，频率比例 factor 逐渐从 0 升到 1；电压幅值保持 0.3V。 */
+      /* 5 旋转：前 500ms，频率比例 factor 逐渐从 0 升到 1；电压幅值保持配置值。 */
       factor = (motor_test_step_ms < MOTOR_TEST_ACCEL_MS) ?
           (float)motor_test_step_ms / (float)MOTOR_TEST_ACCEL_MS : 1.0f;
     }

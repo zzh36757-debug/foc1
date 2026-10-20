@@ -234,8 +234,8 @@ void TIM3_IRQHandler(void)
 }
 
 /* USER CODE BEGIN 1 */
-/* 中断入口只转发，不在这里堆放采样公式或电机动作流程。
- * TIM2 连续输出 20kHz PWM；这里只响应 TIM3 每 1ms 的控制更新。 */
+/* 电机试转时由此转发 TIM3 的 1ms 控制更新。
+ * 当前 AS5600 手转测试没有启动 TIM3；角度读取在 main 的主循环中调用。 */
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
   if (htim->Instance == TIM3)

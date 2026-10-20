@@ -27,11 +27,11 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-/* main.c 只负责 CubeMX 初始化、启动控制模块和主循环。
- * 电机流程：motor_control.c；电流采样：current_sense.c；
- * PWM 硬件输出：motor_driver.c；SVPWM 数学：motor_pwm.c；参数：motor_config.h。
- * 每 1ms 的中断转发在 stm32f1xx_it.c，主循环不负责电机控制节拍。
+/* 当前阶段：关闭电机驱动，只读取 AS5600，手转电机验证机械角度。
+ * 角度读取放在 as5600.c；原电机流程、采样和 SVPWM 模块继续保留。
+ * 此入口不调用 MotorControl_Init()，所以不启动开环试转或 TIM3 控制中断。
  */
+#include "as5600.h"
 #include "motor_control.h"
 #include "motor_driver.h"
 /* USER CODE END Includes */
@@ -98,8 +98,8 @@ int main(void)
   SystemClock_Config();
 
   /* USER CODE BEGIN SysInit */
-  /* 下面先配置 GPIO、DMA、TIM2、ADC 等外设，再由控制模块启动。
-   * I2C/串口当前仅初始化，编码器反馈尚未参与本次开环试转。
+  /* GPIO 初始化先把 PA3/DRV_EN 写低。其余 CubeMX 外设只配置，不启动电机。
+   * 本阶段通过 I2C 读取 AS5600；TIM2 PWM、ADC DMA 和 TIM3 控制中断均不启动。
    */
   /* USER CODE END SysInit */
 
@@ -113,8 +113,10 @@ int main(void)
   MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
   live_core_clock_hz = HAL_RCC_GetHCLKFreq();
-  /* 准备三路 PWM 和电流采样，最后启动 TIM3 每 1ms 更新一次控制流程。 */
-  MotorControl_Init();
+  /* 关闭 PA3/DRV_EN，并将旧电机状态标为停止。这里不启动原先 3 秒后的试转流程。 */
+  MotorControl_Stop(MOTOR_FAULT_NONE);
+  uint32_t heartbeat_tick = HAL_GetTick();
+  HAL_Delay(20); /* 传感器上电后留出稳定时间，再开始读取。 */
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -124,10 +126,15 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    /* 等待期间中断仍运行，电机的 1ms 更新不会被这 100ms 等待拖慢。 */
-    HAL_Delay(100);
+    /* 手转轴测试：约每 10ms 读取一次，I2C 细节和角度换算都在 as5600.c。 */
+    AS5600_Update();
     live_tick_ms = HAL_GetTick();
-    live_counter++;
+    if ((uint32_t)(live_tick_ms - heartbeat_tick) >= 100U)
+    {
+      heartbeat_tick = live_tick_ms;
+      live_counter++; /* 保持原来的主循环心跳：约每 100ms 加 1。 */
+    }
+    HAL_Delay(10);
   }
   /* USER CODE END 3 */
 }

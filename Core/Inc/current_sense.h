@@ -17,6 +17,11 @@ extern volatile uint32_t live_adc_w_raw;
 extern volatile uint32_t live_adc_v_mv;
 extern volatile uint32_t live_adc_w_mv;
 extern volatile uint32_t live_adc_error;
+/* 采样检查结果在 fault=2 停机后保留，可直接放进 Live Watch。 */
+extern volatile uint32_t live_adc_fault_reason; /* 0正常、1未刷新、2 HAL错误、3 V相越量程、4 W相越量程。 */
+extern volatile uint32_t live_adc_fault_v_raw;  /* 最后一次检查时的 V 相 ADC 平均码值。 */
+extern volatile uint32_t live_adc_fault_w_raw;  /* 最后一次检查时的 W 相 ADC 平均码值。 */
+extern volatile uint32_t live_adc_fault_hal_error; /* 最后一次检查时的 HAL ADC 错误位。 */
 extern volatile int32_t live_i_u_ma;
 extern volatile int32_t live_i_v_ma;
 extern volatile int32_t live_i_w_ma;

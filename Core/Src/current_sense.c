@@ -10,6 +10,12 @@ volatile uint32_t live_adc_w_raw = 0;
 volatile uint32_t live_adc_v_mv = 0;
 volatile uint32_t live_adc_w_mv = 0;
 volatile uint32_t live_adc_error = 0;
+/* fault=2 的细分原因：0正常、1 DMA未刷新、2 HAL报错、3 V相越量程、4 W相越量程。
+ * 保存最后一次检查时的读数；故障停机后不再调用检查，因此不会被后续零电流读数覆盖。 */
+volatile uint32_t live_adc_fault_reason = 0;
+volatile uint32_t live_adc_fault_v_raw = 0;
+volatile uint32_t live_adc_fault_w_raw = 0;
+volatile uint32_t live_adc_fault_hal_error = 0;
 volatile int32_t live_i_u_ma = 0;
 volatile int32_t live_i_v_ma = 0;
 volatile int32_t live_i_w_ma = 0;
@@ -82,15 +88,37 @@ void CurrentSense_Update(void)
 /* 采样诊断集中在这里。控制模块只接收“数据能不能用于本轮判断”的结果。 */
 bool CurrentSense_CheckData(void)
 {
+  live_adc_fault_reason = 0;
+  live_adc_fault_v_raw = live_adc_v_raw;
+  live_adc_fault_w_raw = live_adc_w_raw;
+  live_adc_fault_hal_error = live_adc_error;
   /* 每个转换约 (28.5+12.5)/12MHz，64 项约 0.22ms；每 1ms 应看到新的完成标志。 */
-  if ((DMA1->ISR & DMA_ISR_TCIF1) == 0U || live_adc_error != HAL_ADC_ERROR_NONE)
+  if ((DMA1->ISR & DMA_ISR_TCIF1) == 0U)
   {
+    live_adc_fault_reason = 1; /* DMA没有新的整轮传输完成标志，不是数组下标越界。 */
+    return false;
+  }
+  if (live_adc_error != HAL_ADC_ERROR_NONE)
+  {
+    live_adc_fault_reason = 2;
     return false;
   }
   /* 标志位写 1 清除，便于下一轮检查；不会停止 DMA。 */
   DMA1->IFCR = DMA_IFCR_CTCIF1 | DMA_IFCR_CHTIF1;
-  return live_adc_v_raw >= 100U && live_adc_v_raw <= 3995U &&
-         live_adc_w_raw >= 100U && live_adc_w_raw <= 3995U;
+  /* ADC 码值检查范围为 100~4090，不是 DMA 数组长度。
+   * 上限从 3995 放宽到 4090，允许此次观察到的 4000；下限仍为 100。
+   * 这只调整软件判断，不扩大硬件量程，也不保证放大器在边缘处仍线性。 */
+  if (live_adc_v_raw < 100U || live_adc_v_raw > 4090U)
+  {
+    live_adc_fault_reason = 3;
+    return false;
+  }
+  if (live_adc_w_raw < 100U || live_adc_w_raw > 4090U)
+  {
+    live_adc_fault_reason = 4;
+    return false;
+  }
+  return true;
 }
 
 uint32_t CurrentSense_GetMaxAbsMa(void)
