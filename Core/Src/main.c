@@ -27,13 +27,15 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-/* 当前阶段：关闭电机驱动，只读取 AS5600，手转电机验证机械角度。
- * 角度读取放在 as5600.c；原电机流程、采样和 SVPWM 模块继续保留。
- * 此入口不调用 MotorControl_Init()，所以不启动开环试转或 TIM3 控制中断。
+/* 当前阶段：AS5600 速度闭环。算法集中在 speed_power.c。
+ * TIM3 每 1ms 更新电机控制，主循环读取编码器，避免中断中等待 I2C。
+ * motor_config.h 的 MOTOR_USE_SPEED_LOOP=0 可切回原开环试转。
  */
 #include "as5600.h"
 #include "motor_control.h"
 #include "motor_driver.h"
+#include "motor_config.h"
+#include "speed_power.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -98,8 +100,8 @@ int main(void)
   SystemClock_Config();
 
   /* USER CODE BEGIN SysInit */
-  /* GPIO 初始化先把 PA3/DRV_EN 写低。其余 CubeMX 外设只配置，不启动电机。
-   * 本阶段通过 I2C 读取 AS5600；TIM2 PWM、ADC DMA 和 TIM3 控制中断均不启动。
+  /* GPIO 初始化先把 PA3/DRV_EN 写低。外设配置完成后，
+   * MotorControl_Init() 准备 PWM、ADC DMA 和 TIM3，再等待、校准并启动控制。
    */
   /* USER CODE END SysInit */
 
@@ -113,8 +115,12 @@ int main(void)
   MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
   live_core_clock_hz = HAL_RCC_GetHCLKFreq();
-  /* 关闭 PA3/DRV_EN，并将旧电机状态标为停止。这里不启动原先 3 秒后的试转流程。 */
-  MotorControl_Stop(MOTOR_FAULT_NONE);
+  /* 闭环状态先清零，再启动原有 PWM/采样/1ms 定时调度。
+   * 闭环先校准方向和零点，随后持续运行；旧开环仍保持原来的短时流程。 */
+#if MOTOR_USE_SPEED_LOOP
+  SpeedPower_Init();
+#endif
+  MotorControl_Init();
   uint32_t heartbeat_tick = HAL_GetTick();
   HAL_Delay(20); /* 传感器上电后留出稳定时间，再开始读取。 */
   /* USER CODE END 2 */
@@ -126,15 +132,23 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    /* 手转轴测试：约每 10ms 读取一次，I2C 细节和角度换算都在 as5600.c。 */
+    /* I2C 只在这里执行。闭环减少主循环等待，给 TIM3 提供更及时的角度。 */
+#if MOTOR_USE_SPEED_LOOP
+    SpeedPower_PollSensor();
+#else
     AS5600_Update();
+#endif
     live_tick_ms = HAL_GetTick();
     if ((uint32_t)(live_tick_ms - heartbeat_tick) >= 100U)
     {
       heartbeat_tick = live_tick_ms;
       live_counter++; /* 保持原来的主循环心跳：约每 100ms 加 1。 */
     }
+#if MOTOR_USE_SPEED_LOOP
+    HAL_Delay(1);
+#else
     HAL_Delay(10);
+#endif
   }
   /* USER CODE END 3 */
 }
