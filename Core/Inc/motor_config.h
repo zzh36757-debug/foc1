@@ -11,7 +11,7 @@
 #define MOTOR_PWM_PERIOD         1800U          /* TIM2 中心对齐计数的 ARR。 */
 #define MOTOR_TEST_NEUTRAL_CCR   900U           /* 900/1800=50%，三路相同的初始值。 */
 #define MOTOR_TEST_BUS_VOLTS     12.0f          /* 计算所用母线电压，单位 V。 */
-#define MOTOR_TEST_VECTOR_VOLTS  3.50f          /* 电压矢量幅值，V；影响电流与驱动力，不是占空比。 */
+#define MOTOR_TEST_VECTOR_VOLTS  3.80f          /* 电压矢量幅值，V；影响电流与驱动力，不是占空比。 */
 #define MOTOR_TEST_ELECTRICAL_HZ 100.00f          /* 电角度每秒转多少圈，与 20kHz 载波不同。 */
 #define MOTOR_TEST_WAIT_MS       1000U          /* 旧开环的等待时间；闭环约 1 秒的准备在 speed_power.c。 */
 #define MOTOR_TEST_RAMP_MS       600U           /* 定位时的电压升幅时间，ms。 */
