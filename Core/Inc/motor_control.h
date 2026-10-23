@@ -4,8 +4,7 @@
 #include <stdint.h>
 
 /* 用名称替代状态判断中的数字。数值保持原样，已有 Live Watch 无需修改。
- * 开环：WAIT -> ALIGN_RAMP -> ALIGN_HOLD -> ROTATE -> RAMP_DOWN -> COMPLETE。
- * 闭环：WAIT -> ALIGN_RAMP -> ALIGN_HOLD -> SENSOR_FORWARD -> SPEED，准备合计约 1 秒。
+ * 正常执行：WAIT -> ALIGN_RAMP -> ALIGN_HOLD -> ROTATE -> RAMP_DOWN -> COMPLETE。
  */
 typedef enum
 {
@@ -15,13 +14,10 @@ typedef enum
   MOTOR_STATE_COMPLETE = 3,
   MOTOR_STATE_FAULT = 4,
   MOTOR_STATE_ROTATE = 5,
-  MOTOR_STATE_RAMP_DOWN = 6,
-  MOTOR_STATE_SENSOR_FORWARD = 7,  /* 闭环启动：单向小角度识别，不再回扫。 */
-  MOTOR_STATE_SENSOR_BACKWARD = 8, /* 保留旧编号；当前启动流程不使用。 */
-  MOTOR_STATE_SPEED = 9            /* 持续速度闭环。 */
+  MOTOR_STATE_RAMP_DOWN = 6
 } MotorState;
 
-/* 0~6 保留原有软件诊断码，7/8 用于闭环所需的角度与校准检查。
+/* 这些是原有的软件诊断码，本次拆分不新增保护项。
  * 原板 nFAULT 未接 MCU，fault=0 不能代替 DRV8313 芯片故障检测。
  */
 typedef enum
@@ -32,9 +28,7 @@ typedef enum
   MOTOR_FAULT_CURRENT = 3,
   MOTOR_FAULT_DISABLED = 4,
   MOTOR_FAULT_TIME = 5,
-  MOTOR_FAULT_CONFIG = 6,
-  MOTOR_FAULT_SENSOR = 7,    /* 闭环角度无效、通信失败或数据过期。 */
-  MOTOR_FAULT_ALIGNMENT = 8  /* 校准时实测位移与 7 对极的预期不符。 */
+  MOTOR_FAULT_CONFIG = 6
 } MotorFault;
 
 void MotorControl_Init(void);            /* 启动输出/采样模块，检查初始状态，最后开启 TIM3。 */

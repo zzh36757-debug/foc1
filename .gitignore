@@ -1,6 +1,6 @@
 # STM32 / CubeMX + CMake 工程
 # 保留 Core/、Drivers/、cmake/、debug/、*.ioc、启动文件和链接脚本。
-# .vscode/ 的构建/调试配置和 .vscode.f1/、.vscode.f4/ 的复用模板也保留。
+# .vscode/ 的构建/调试配置和 .vscode.f1/ 的复用模板也保留。
 
 # 构建输出目录
 /build/

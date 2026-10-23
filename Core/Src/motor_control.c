@@ -5,16 +5,13 @@
 #include "current_sense.h"
 #include "main.h"
 #include "tim.h"
-#include "speed_power.h"
 
 /* 本文件安排“电机现在做什么”。
  * 采样/换算交给 current_sense.c；PWM 寄存器/使能交给 motor_driver.c；
  * SVPWM 公式在 motor_pwm.c；参数在 motor_config.h。
- * MOTOR_USE_SPEED_LOOP=1 时，动作交给 speed_power.c 的速度闭环；
- * 设为 0 时保留原来的短时开环试转。两者共用初始化、采样和停机检查。
+ * 本版是短时开环试转：自行推进指令电角度，尚未使用编码器反馈或 PID。
  *
- * 当前闭环动作先读 speed_power.c 的 SpeedPower_Update1ms()；RunMotorState() 只用于开环。
- * 本文件末尾 Init()/Update1ms() 负责初始化和每 1ms 的调度。
+ * 建议先读 RunMotorState() 看动作流程，再读末尾 Init()/Update1ms() 看调度。
  * 原有诊断集中在 CheckProtection()/CheckUpdateDuration()，与动作计算分开。
  */
 volatile uint32_t motor_test_state = MOTOR_STATE_WAIT;
@@ -24,10 +21,8 @@ volatile uint32_t motor_test_rotate_ticks = 0;
 volatile uint32_t motor_command_angle_mdeg = 0;
 volatile uint32_t motor_control_max_us = 0;
 
-#if !MOTOR_USE_SPEED_LOOP
 static uint32_t motor_test_step_ms = 0; /* 当前阶段的毫秒计时，换阶段时清零。 */
 static float motor_field_angle = 0.0f; /* 指令电角度，单位 rad，不是实测轴角度。 */
-#endif
 
 void MotorControl_Stop(MotorFault fault)
 {
@@ -36,13 +31,8 @@ void MotorControl_Stop(MotorFault fault)
   MotorDriver_SetPwm(MOTOR_TEST_NEUTRAL_CCR, MOTOR_TEST_NEUTRAL_CCR, MOTOR_TEST_NEUTRAL_CCR);
   motor_test_fault = fault;
   motor_test_state = (fault == MOTOR_FAULT_NONE) ? MOTOR_STATE_COMPLETE : MOTOR_STATE_FAULT;
-#if MOTOR_USE_SPEED_LOOP
-  speed_requested_uq_volts = 0.0f;
-  speed_uq_volts = 0.0f;
-#endif
 }
 
-#if !MOTOR_USE_SPEED_LOOP
 static void SetMotorVector(float angle, float volts)
 {
   uint16_t compare[3];
@@ -65,7 +55,7 @@ static void RunMotorState(void)
   motor_test_step_ms++;
   if (motor_test_state == MOTOR_STATE_WAIT)
   {
-    /* 0 等待：前 1 秒不通电，到时使能三个半桥，进入定位。 */
+    /* 0 等待：前 3 秒不通电，到时使能三个半桥，进入定位。 */
     if (motor_test_step_ms >= MOTOR_TEST_WAIT_MS)
     {
       motor_test_step_ms = 0;
@@ -118,9 +108,9 @@ static void RunMotorState(void)
       factor = 1.0f - (float)motor_test_step_ms / (float)MOTOR_TEST_DOWN_MS;
       volts *= factor;
     }
-    /* 开环转动：delta_angle = 2*pi * 电频率 * 0.001秒 * 加减速比例。
-     * 具体每次推进多少由 MOTOR_TEST_ELECTRICAL_HZ 决定。
-     * 7 极对电机跟随时，机械角度=电角度/7；累计角度还取决于试转时长。
+    /* 转动的核心：delta_angle = 2*pi * 电频率 * 0.001秒 * 加减速比例。
+     * 匀速时每 1ms 推进 0.00314rad=0.18 电角度，2 秒走完一个电角度周期。
+     * 7 极对电机跟随时，机械角度=电角度/7。本版累计指令机械角度约 100 度。
      * 每次给新方向，SetMotorVector() 先计算三路 PWM，再交给驱动模块写入 TIM2。
      */
     motor_field_angle += MOTOR_TEST_TWO_PI * MOTOR_TEST_ELECTRICAL_HZ * 0.001f * factor;
@@ -137,9 +127,7 @@ static void RunMotorState(void)
   }
 }
 
-#endif
-
-/* 原有运行检查集中在这里。闭环所需的角度/校准检查放在 speed_power.c。 */
+/* 原有运行检查集中在这里。返回 true 才继续本轮动作，没有新增保护项。 */
 static bool CheckProtection(void)
 {
   /* 完成或故障后仍观察电流，但不再自动启动。 */
@@ -215,11 +203,7 @@ void MotorControl_Update1ms(void)
   CurrentSense_Update();          /* 取样和电流换算。 */
   if (CheckProtection())
   {
-#if MOTOR_USE_SPEED_LOOP
-    SpeedPower_Update1ms();       /* 闭环：实测速度 -> PI -> Uq -> 实测角度换相。 */
-#else
-    RunMotorState();              /* 开环：按时间推进指令角度。 */
-#endif
+    RunMotorState();              /* 按阶段推进角度，交给驱动层输出。 */
   }
   CheckUpdateDuration(start_cycles);
 }
