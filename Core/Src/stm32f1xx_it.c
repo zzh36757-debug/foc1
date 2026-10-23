@@ -235,7 +235,7 @@ void TIM3_IRQHandler(void)
 
 /* USER CODE BEGIN 1 */
 /* 电机试转时由此转发 TIM3 的 1ms 控制更新。
- * 当前 AS5600 手转测试没有启动 TIM3；角度读取在 main 的主循环中调用。 */
+ * AS5600 角度读取在 main 的主循环中调用，不放在此中断里。 */
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
   if (htim->Instance == TIM3)

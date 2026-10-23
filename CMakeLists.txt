@@ -45,10 +45,11 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 # Add sources to executable
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
-    # 自定义模块：AS5600 角度读取、电流采样、试转流程、PWM 输出、SVPWM。
+    # 自定义模块：AS5600、电流采样、调度、速度闭环、PWM 输出、SVPWM。
     Core/Src/as5600.c
     Core/Src/current_sense.c
     Core/Src/motor_control.c
+    Core/Src/speed_power.c
     Core/Src/motor_driver.c
     Core/Src/motor_pwm.c
 )

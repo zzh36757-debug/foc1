@@ -5,7 +5,7 @@
 ## 运行
 
 1. 接好板子电源和 ST-Link 的 USB、SWD 连线。
-2. 按 F5，选择 `STM32F103C8 - Live Watch (ST-Link)`。VS Code 会先用 CMake 的 Debug preset 编译，再下载程序。
+2. 按 F5，选择 `STM32F103C8 - Live Watch (ST-Link)`。VS Code 会先用 CMake 的 Debug preset 编译，再执行 `prepare GDB` 准备任务，随后启动下载调试。
 3. 首次会停在 `main()`，再按一次 F5 继续运行。
 4. 在“运行和调试”侧栏展开 **CORTEX LIVE WATCH**，点 `+`，逐个添加下面的变量。需要保持程序运行，才能看到数字变化。
 
@@ -20,12 +20,15 @@ Live Watch 每秒采样 4 次，所以 `live_counter` 画面上可能一次跳�
 
 ## 本次测试程序
 
-`Core/Src/main.c` 保留约每 100ms 更新的心跳计数。**当前入口为[AS5600 手转测角度](AS5600_ANGLE_TEST.md)：PA3/DRV_EN 保持低，不启动原来的开环试转。** 编码器约每 10ms 在主循环读取一次；按新说明添加 `live_as5600_*` 变量。旧电流、PWM 模块继续保留，但本阶段不启动其采样和控制流程。
+`Core/Src/main.c` 保留约每 100ms 更新的心跳计数。**当前默认入口为 [AS5600 速度闭环](SPEED_POWER.md)。** 继续运行后约 1 秒完成短定位和单向小角度识别，随后按默认 300rpm 持续运行；目标不再截成 120rpm，内部指令按 120rpm/s 平滑升速。重点观察 `speed_target_rpm`、`speed_command_rpm`、`speed_measured_rpm`、`speed_requested_uq_volts`、`speed_uq_volts`、`speed_calibrated`、`motor_test_state` 和 `motor_test_fault`。请求 Uq 与输出 Uq 的区别和负载诊断见速度闭环说明。`speed_run` 写 0 关闭驱动；目标转速写 0 则仍会尝试保持零速。
 
 计数正常变化，说明下载、主循环和 SysTick 已经能够运行；电机驱动、电流采样、编码器还要分别验证。
 
 ## 常见情况
 
+- 弹窗提示 `Could not start gdb, no response from gdb`：这是电脑端 GDB 启动超时。
+  本工程已加入 `-nx` 和 `prepare GDB`，2026-10-20 调整后用户确认恢复。
+  保留这些设置；再次发生时按[下载调试故障记录](debug/README.md)检查。
 - OpenOCD 提示 `Error: open failed`：下载器没有被打开，先确认电脑能够识别 ST-Link、USB 数据线和驱动。
 - 停在 `main()`，数字不变：按 F5 继续运行。
 - 已运行但 `live_error` 为 `1`：暂停后查看调用栈，定位失败的初始化步骤。

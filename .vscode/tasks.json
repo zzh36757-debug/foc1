@@ -32,6 +32,32 @@
                 "isDefault": true
             },
             "problemMatcher": ["$gcc"]
+        },
+        {
+            "label": "flash ST-Link",
+            "type": "process",
+            "command": "${env:SystemRoot}/System32/WindowsPowerShell/v1.0/powershell.exe",
+            "args": ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}/debug/flash-stlink.ps1", "-Target", "STM32F103C8", "-Board", "Foc1", "-ElfPath", "${workspaceFolder}/build/Debug/foc1.elf"],
+            "dependsOn": "build",
+            "dependsOrder": "sequence",
+            "options": { "cwd": "${workspaceFolder}" },
+            "problemMatcher": []
+        },
+        {
+            "label": "warm GDB",
+            "type": "process",
+            "command": "C:/Users/30952/.eide/tools/gcc_arm/bin/arm-none-eabi-gdb.exe",
+            "args": ["-nx", "-q", "--batch", "-ex", "show version"],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "prepare GDB",
+            "dependsOn": ["flash ST-Link", "warm GDB"],
+            "dependsOrder": "parallel",
+            "problemMatcher": []
         }
     ]
 }

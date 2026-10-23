@@ -1,0 +1,11 @@
+{
+    "cmake.cmakePath": "C:/Users/30952/tools/cmake/bin/cmake.exe",
+    "cmake.useCMakePresets": "always",
+    "cmake.environment": {
+        "PATH": "C:/Users/30952/.eide/tools/gcc_arm/bin;C:/Users/30952/tools/ninja;C:/Users/30952/tools/cmake/bin;${env:PATH}"
+    },
+    "cortex-debug.liveWatchRefreshRate": 250,
+    "files.associations": {
+        "*.h": "c"
+    }
+}
