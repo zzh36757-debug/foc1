@@ -1,123 +1,162 @@
 #include "current_sense.h"
 #include "adc.h"
+#include "tim.h"
+#include "motor_config.h"
+#include "motor_control.h"
 
-/* 电流采样链：相线电流 -> 0.01 欧电阻 -> INA240A2（50 倍）-> PA4/V、PA5/W。
- * REF 约 1.65V，因此零电流的 ADC 码值约 2048。先记零点，再用偏差换算电流。
- * 本版为异步连续采样、取平均，供低速试转观察和辅助停机检查，尚非 FOC 同步采样。
- */
-volatile uint32_t live_adc_v_raw = 0;
-volatile uint32_t live_adc_w_raw = 0;
-volatile uint32_t live_adc_v_mv = 0;
-volatile uint32_t live_adc_w_mv = 0;
-volatile uint32_t live_adc_error = 0;
-/* fault=2 的细分原因：0正常、1 DMA未刷新、2 HAL报错、3 V相越量程、4 W相越量程。
- * 保存最后一次检查时的读数；故障停机后不再调用检查，因此不会被后续零电流读数覆盖。 */
-volatile uint32_t live_adc_fault_reason = 0;
-volatile uint32_t live_adc_fault_v_raw = 0;
-volatile uint32_t live_adc_fault_w_raw = 0;
-volatile uint32_t live_adc_fault_hal_error = 0;
-volatile int32_t live_i_u_ma = 0;
-volatile int32_t live_i_v_ma = 0;
-volatile int32_t live_i_w_ma = 0;
+/* 采样链：V/W 相线 -> 0.01欧 -> INA240A2(50倍) -> PA4/PA5。
+ * TIM2 CH4 只作内部触发，不把 PA3 改成复用输出，PA3 仍然是 DRV_EN。
+ * TIM4 数 10 个 PWM 周期触发一次 ADC，两相完成后由 DMA 回调启动电流计算。 */
+volatile uint32_t live_adc_v_raw, live_adc_w_raw;
+volatile uint32_t live_adc_v_mv, live_adc_w_mv, live_adc_error;
+volatile uint32_t live_adc_fault_reason, live_adc_fault_v_raw, live_adc_fault_w_raw;
+volatile uint32_t live_adc_fault_hal_error;
+volatile int32_t live_i_u_ma, live_i_v_ma, live_i_w_ma;
+volatile uint32_t live_adc_sample_count, live_adc_sample_cycles;
 
-static uint32_t adc_zero_v = 0;
-static uint32_t adc_zero_w = 0;
-/* DMA 按 V,W,V,W,... 循环写入 64 个 16 位数据，即每相 32 个样本。 */
-static volatile uint16_t adc_dma_samples[64] __attribute__((aligned(4)));
+static uint32_t adc_zero_v = 2048U, adc_zero_w = 2048U;
+static volatile uint32_t zero_sum_v, zero_sum_w, zero_count;
+static uint32_t checked_sequence;
+/* 两个银行，每个银行是一对 V,W。半满读 [0,1]，全满读 [2,3]。
+ * 回调只读已完成的一半；不会一边遍历平均，一边被 DMA 覆盖。 */
+static volatile uint16_t adc_dma_samples[4] __attribute__((aligned(4)));
 
-static void ReadAdcAverage(void)
+static bool LatchFault(uint32_t reason)
 {
-  uint32_t sum_v = 0;
-  uint32_t sum_w = 0;
-  for (uint32_t sample = 0; sample < 64; sample += 2)
+  uint32_t mask = __get_PRIMASK();
+  __disable_irq();
+  if (live_adc_fault_reason == 0U)
   {
-    sum_v += adc_dma_samples[sample];
-    sum_w += adc_dma_samples[sample + 1];
+    live_adc_fault_v_raw = live_adc_v_raw;
+    live_adc_fault_w_raw = live_adc_w_raw;
+    live_adc_fault_hal_error = live_adc_error;
+    live_adc_fault_reason = reason;
   }
-  live_adc_v_raw = sum_v / 32;
-  live_adc_w_raw = sum_w / 32;
-  /* 12 位 ADC：0~4095。按 3.3V 参考电压换算 mV，加 2047 实现就近取整。
-   * 这里是放大器输出电压，不是 U/V/W 端子上约 0/12V 的功率 PWM 电压。 */
-  live_adc_v_mv = (live_adc_v_raw * 3300U + 2047U) / 4095U;
-  live_adc_w_mv = (live_adc_w_raw * 3300U + 2047U) / 4095U;
-  live_adc_error = HAL_ADC_GetError(&hadc1);
+  __set_PRIMASK(mask);
+  return false;
 }
 
 bool CurrentSense_Init(void)
 {
-  /* 此时驱动必须关闭。ADC 自身校准与下面的“传感器零点校准”是两件事。 */
-  if (HAL_ADCEx_Calibration_Start(&hadc1) != HAL_OK)
-  {
-    return false;
-  }
-  /* HAL 形参使用 uint32_t 指针；DMA 实际宽度在 adc.c 中设为 16 位。 */
-  if (HAL_ADC_Start_DMA(&hadc1, (uint32_t *)adc_dma_samples, 64) != HAL_OK)
-  {
-    return false;
-  }
-  /* 关闭频繁的半满/全满中断通知，数据搬运和状态标志仍继续工作。
-   * 控制模块每 1ms 调用本模块读取数据，不在每次 ADC 转换后执行电机算法。 */
-  __HAL_DMA_DISABLE_IT(hadc1.DMA_Handle, DMA_IT_HT | DMA_IT_TC);
-  HAL_Delay(20);
-  return true;
+  zero_sum_v = zero_sum_w = zero_count = 0;
+  checked_sequence = live_adc_sample_count = live_adc_fault_reason = 0;
+  if (HAL_ADCEx_Calibration_Start(&hadc1) != HAL_OK) { return false; }
+
+  /* 定时器链路参考 RM0008：TIM4 的 ITR1 = TIM2_TRGO；
+   * ADC1 常规组支持 TIM4_CC4。这里的 TIM4 由本模块管理，不输出 GPIO、不进 TIM4 中断。 */
+  TIM_OC_InitTypeDef sample_oc = {0};
+  sample_oc.OCMode = TIM_OCMODE_PWM2;
+  sample_oc.Pulse = MOTOR_ADC_TRIGGER_CCR;
+  sample_oc.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sample_oc.OCFastMode = TIM_OCFAST_DISABLE;
+  TIM_MasterConfigTypeDef master = {0};
+  master.MasterOutputTrigger = TIM_TRGO_OC4REF;
+  master.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIM_PWM_ConfigChannel(&htim2, &sample_oc, TIM_CHANNEL_4) != HAL_OK ||
+      HAL_TIMEx_MasterConfigSynchronization(&htim2, &master) != HAL_OK ||
+      HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_4) != HAL_OK) { return false; }
+
+  __HAL_RCC_TIM4_CLK_ENABLE();
+  TIM4->CR1 = 0;
+  TIM4->CR2 = 0;
+  TIM4->DIER = 0;
+  TIM4->PSC = 0;
+  TIM4->ARR = MOTOR_CURRENT_PWM_DIVIDER - 1U;
+  TIM4->CCR4 = MOTOR_CURRENT_PWM_DIVIDER - 1U;
+  TIM4->CCMR1 = 0;
+  /* F103 的 ADC TIM4_CC4 触发需要内部通道波形的有效边沿。
+   * 冻结模式虽会置 CC4IF，却不会触发本板 ADC；PWM2 在 CNT=CCR4 时上升。
+   * 这里只生成内部波形，不配置 PB9 或任何 GPIO 复用输出。 */
+  TIM4->CCMR2 = TIM_OCMODE_PWM2 << 8U; /* OC4M=111，PWM2。 */
+  TIM4->CCER = TIM_CCER_CC4E;
+  TIM4->SMCR = TIM_TS_ITR1 | TIM_SLAVEMODE_EXTERNAL1;
+  TIM4->EGR = TIM_EGR_UG;
+  TIM4->SR = 0;
+  if (HAL_ADC_Start_DMA(&hadc1, (uint32_t *)adc_dma_samples, 4U) != HAL_OK) { return false; }
+  TIM4->CR1 = TIM_CR1_CEN;
+  HAL_Delay(40); /* 驱动关闭时，累计 64 组零点，2kHz 下约需 32ms。 */
+  if (live_adc_sample_count < 64U) { return LatchFault(1U); }
+  return live_adc_fault_reason == 0U;
 }
 
 bool CurrentSense_CalibrateZero(void)
 {
-  ReadAdcAverage();
-  adc_zero_v = live_adc_v_raw;
-  adc_zero_w = live_adc_w_raw;
+  if (zero_count != 64U || live_adc_fault_reason != 0U) { return false; }
+  adc_zero_v = (zero_sum_v + 32U) / 64U;
+  adc_zero_w = (zero_sum_w + 32U) / 64U;
   return adc_zero_v >= 1800U && adc_zero_v <= 2300U &&
          adc_zero_w >= 1800U && adc_zero_w <= 2300U &&
          live_adc_error == HAL_ADC_ERROR_NONE;
 }
 
-void CurrentSense_Update(void)
+static void ConsumePair(uint32_t offset)
 {
-  ReadAdcAverage();
-  /* 1A -> 0.01欧*50=0.5V 的输出变化。
-   * I(mA)=码值差*(3.3/4095)/(50*0.01)*1000=码值差*6600/4095。
-   * 原板 IN+ 在电机侧、IN- 在驱动侧，流入电机时输出低于零点，所以用零点减读数。
-   * 先转有符号 int32_t 再相减，保留电流方向。参考电压/增益偏差仍影响估算精度。 */
-  live_i_v_ma = ((int32_t)adc_zero_v - (int32_t)live_adc_v_raw) * 6600 / 4095;
-  live_i_w_ma = ((int32_t)adc_zero_w - (int32_t)live_adc_w_raw) * 6600 / 4095;
-  /* 三线电机无中性线，iU+iV+iW=0，U 相由另外两相推算。 */
+  uint32_t sample_cycles = DWT->CYCCNT;
+  /* HT 对应另一半正在写，TC 同理；若通知积压到当前半区已重新开始写，拒绝旧数据。 */
+  uint32_t remaining = __HAL_DMA_GET_COUNTER(hadc1.DMA_Handle);
+  if ((offset == 0U && remaining > 2U) ||
+      (offset == 2U && remaining <= 2U))
+  {
+    (void)LatchFault(5U);
+  }
+  uint32_t v = adc_dma_samples[offset];
+  uint32_t w = adc_dma_samples[offset + 1U];
+  live_adc_v_raw = v;
+  live_adc_w_raw = w;
+  live_adc_v_mv = (v * 3300U + 2047U) / 4095U;
+  live_adc_w_mv = (w * 3300U + 2047U) / 4095U;
+  live_adc_error = HAL_ADC_GetError(&hadc1);
+  /* IN+ 在电机侧，所以“流入电机为正”时用零点减读数；1A 对应 0.5V。 */
+  live_i_v_ma = ((int32_t)adc_zero_v - (int32_t)v) * 6600 / 4095;
+  live_i_w_ma = ((int32_t)adc_zero_w - (int32_t)w) * 6600 / 4095;
   live_i_u_ma = -live_i_v_ma - live_i_w_ma;
+  live_adc_sample_cycles = sample_cycles;
+  live_adc_sample_count++;
+  if (zero_count < 64U)
+  {
+    zero_sum_v += v;
+    zero_sum_w += w;
+    zero_count++;
+  }
+  MotorControl_OnCurrentSample();
 }
 
-/* 采样诊断集中在这里。控制模块只接收“数据能不能用于本轮判断”的结果。 */
+void HAL_ADC_ConvHalfCpltCallback(ADC_HandleTypeDef *hadc)
+{
+  if (hadc == &hadc1) { ConsumePair(0U); }
+}
+
+void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)
+{
+  if (hadc == &hadc1) { ConsumePair(2U); }
+}
+
+void HAL_ADC_ErrorCallback(ADC_HandleTypeDef *hadc)
+{
+  if (hadc == &hadc1)
+  {
+    live_adc_error = HAL_ADC_GetError(hadc);
+    (void)LatchFault(2U);
+    MotorControl_OnCurrentSample();
+  }
+}
+
+bool CurrentSense_CheckSample(void)
+{
+  if (live_adc_fault_reason != 0U) { return false; }
+  if (live_adc_error != HAL_ADC_ERROR_NONE) { return LatchFault(2U); }
+  if (live_adc_v_raw < 100U || live_adc_v_raw > 4090U) { return LatchFault(3U); }
+  if (live_adc_w_raw < 100U || live_adc_w_raw > 4090U) { return LatchFault(4U); }
+  return true;
+}
+
 bool CurrentSense_CheckData(void)
 {
-  live_adc_fault_reason = 0;
-  live_adc_fault_v_raw = live_adc_v_raw;
-  live_adc_fault_w_raw = live_adc_w_raw;
-  live_adc_fault_hal_error = live_adc_error;
-  /* 每个转换约 (28.5+12.5)/12MHz，64 项约 0.22ms；每 1ms 应看到新的完成标志。 */
-  if ((DMA1->ISR & DMA_ISR_TCIF1) == 0U)
-  {
-    live_adc_fault_reason = 1; /* DMA没有新的整轮传输完成标志，不是数组下标越界。 */
-    return false;
-  }
-  if (live_adc_error != HAL_ADC_ERROR_NONE)
-  {
-    live_adc_fault_reason = 2;
-    return false;
-  }
-  /* 标志位写 1 清除，便于下一轮检查；不会停止 DMA。 */
-  DMA1->IFCR = DMA_IFCR_CTCIF1 | DMA_IFCR_CHTIF1;
-  /* ADC 码值检查范围为 100~4090，不是 DMA 数组长度。
-   * 上限从 3995 放宽到 4090，允许此次观察到的 4000；下限仍为 100。
-   * 这只调整软件判断，不扩大硬件量程，也不保证放大器在边缘处仍线性。 */
-  if (live_adc_v_raw < 100U || live_adc_v_raw > 4090U)
-  {
-    live_adc_fault_reason = 3;
-    return false;
-  }
-  if (live_adc_w_raw < 100U || live_adc_w_raw > 4090U)
-  {
-    live_adc_fault_reason = 4;
-    return false;
-  }
+  /* TIM3 只检查刷新；硬件/DMA 标志交给 HAL 中断处理，不能在此抢先清 TC/HT。 */
+  if (live_adc_fault_reason != 0U) { return false; }
+  uint32_t sequence = live_adc_sample_count;
+  if (sequence == checked_sequence) { return LatchFault(1U); }
+  checked_sequence = sequence;
   return true;
 }
 

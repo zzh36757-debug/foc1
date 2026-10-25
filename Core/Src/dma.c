@@ -25,8 +25,8 @@
 /* DMA 是外设数据的自动搬运器：ADC 转换完成后，把结果直接写进内存数组，
  * CPU 不必逐个等待转换。此文件打开 DMA1 时钟并配置中断入口；具体通道、数据宽度、
  * 循环模式在 adc.c 中设置，缓冲区地址/长度在 current_sense.c 的 HAL_ADC_Start_DMA() 中指定。
- * 虽然这里允许 NVIC 中断，但 current_sense.c 在开始后关闭了 HT/TC 通知，避免频繁进入回调；
- * 数据搬运和完成标志仍正常工作，控制程序通过 1ms 定时更新来读取。
+ * 四项循环缓冲区的半满/全满各对应一组 V/W；保持 HT/TC 通知，2kHz 运行电流内环。
+ * DMA 优先级 0 高于 TIM3 的 1；及时取走已完成半区，避免读取正在覆盖的数据。
  */
 /* USER CODE END 0 */
 
@@ -51,6 +51,8 @@ void MX_DMA_Init(void)
   /* DMA1_Channel1_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA1_Channel1_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(DMA1_Channel1_IRQn);
+  HAL_NVIC_SetPriority(DMA1_Channel4_IRQn, 2, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel4_IRQn);
 
 }
 

@@ -20,9 +20,34 @@ Live Watch 每秒采样 4 次，所以 `live_counter` 画面上可能一次跳�
 
 ## 本次测试程序
 
-`Core/Src/main.c` 保留约每 100ms 更新的心跳计数。**当前默认入口为 [AS5600 速度闭环](SPEED_POWER.md)。** 继续运行后约 1 秒完成短定位和单向小角度识别，随后按默认 300rpm 持续运行；目标不再截成 120rpm，内部指令按 120rpm/s 平滑升速。重点观察 `speed_target_rpm`、`speed_command_rpm`、`speed_measured_rpm`、`speed_requested_uq_volts`、`speed_uq_volts`、`speed_calibrated`、`motor_test_state` 和 `motor_test_fault`。请求 Uq 与输出 Uq 的区别和负载诊断见速度闭环说明。`speed_run` 写 0 关闭驱动；目标转速写 0 则仍会尝试保持零速。
+当前入口见 [电流控制说明](CURRENT_CONTROL.md)，约1秒定位/单向识别后进入状态9。
+本轮默认current_mode=0：固定Iq=0.10A、Id目标0，电流P/I仍0.20/100；
+电流PI随2kHz同步采样更新PWM，duration=0持续运行，状态9/故障0/current_test_done=0。
+不控制转速；速度PI不参与，编码器/测速仍用于换相。重新下载并运行以清掉旧积分和测试状态。
 
-计数正常变化，说明下载、主循环和 SysTick 已经能够运行；电机驱动、电流采样、编码器还要分别验证。
+优先添加：
+
+- `current_test_iq_a`、`current_test_elapsed_ms`、`current_test_done`
+- `current_test_iq_error_max_a`、`current_test_id_abs_max_a`
+- `speed_target_rpm`、`speed_command_rpm`、`speed_measured_rpm`
+- `current_iq_target_a`、`current_iq_a`、`current_id_a`
+- `current_ud_volts`、`current_uq_volts`、`current_voltage_limited`
+- `live_adc_sample_count`、`current_control_period_us`、`current_control_max_us`
+- `current_alignment_stage`、`motor_test_state`、`motor_test_fault`
+
+目标Iq默认限幅1A，总电压预算3.8V。电流PI与速度PI初值均待实物整定。
+`current_mode=0`时使用`current_test_iq_a=0.10A`持续固定电流运行，不保持指定转速；
+`current_mode=1`为速度+电流双环。停机用`speed_run=0`，不会自动重启。
+`current_test_duration_ms=0`表示取消按时长结束；非0才会到时正常停机并置done=1。
+结束后current_id_a/iq_a保留停止前最后一组控制反馈，current_iq_target_a和输出电压指令清零。
+误差峰值略过前100ms建立期，之后按每次ADC反馈统计并保留；停机后的Id/Iq不是此刻的实时电流。
+
+旧`speed_uq_volts`现在显示电流PI限幅后Uq，`speed_requested_uq_volts`显示限幅前Uq。
+ADC原始值和相电流现为一组采样，已不再是每相32点平均。
+若故障9，看`current_alignment_stage`及`current_alignment_along_a/across_a`。
+故障2新增DMA细分原因5；故障7在电流模式包含角度超过15ms未更新。
+
+保留原有下载调试流程，以下下载说明未改。实物运行和中断耗时需下载后验证。
 
 ## 常见情况
 
@@ -53,3 +78,8 @@ SWD 速度设置为 **100kHz**，与已有 `D:/test/jixiebi1/.vscode/launch.json
 原始 Flash 备份和联调日志保存在 `D:/PCB/bringup-foc1-20261017/`。
 
 参考：[Cortex-Debug 官方 Live Watch 说明](https://github.com/Marus/cortex-debug/issues/810)。
+# USART1 波形补充（2026-10-23）
+
+Iq/Id 可通过 USART1 的 FireWater 文本波形查看，三位小数/A，配置见 [VOFA_CURRENT.md](VOFA_CURRENT.md)。
+`vofa_sent_frames` 为已发帧数；`vofa_dropped_frames` 和 `vofa_tx_errors` 正常应为0。
+停机排空队列后不再发送旧电流值。原 Live Watch 变量保持原用途。

@@ -48,10 +48,18 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # 自定义模块：AS5600、电流采样、调度、速度闭环、PWM 输出、SVPWM。
     Core/Src/as5600.c
     Core/Src/current_sense.c
+    Core/Src/current_control.c
     Core/Src/motor_control.c
     Core/Src/speed_power.c
     Core/Src/motor_driver.c
     Core/Src/motor_pwm.c
+    Core/Src/vofa.c
+)
+
+# F103 无 FPU；只优化控制计算模块，其他文件保持 Debug 的 -O0 和调试信息。
+set_source_files_properties(
+    Core/Src/current_control.c Core/Src/motor_pwm.c Core/Src/speed_power.c
+    PROPERTIES COMPILE_OPTIONS "-O2"
 )
 
 # Add include paths

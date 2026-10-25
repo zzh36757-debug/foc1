@@ -27,8 +27,9 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-/* 当前阶段：AS5600 速度闭环。算法集中在 speed_power.c。
- * TIM3 每 1ms 更新电机控制，主循环读取编码器，避免中断中等待 I2C。
+/* 当前阶段：AS5600 速度外环 + d/q 电流内环。
+ * speed_power.c 每 1ms 给目标 Iq；current_control.c 随 ADC/DMA 每 500us 控制电流。
+ * 主循环读取编码器，避免中断中等待 I2C。
  * motor_config.h 的 MOTOR_USE_SPEED_LOOP=0 可切回原开环试转。
  */
 #include "as5600.h"
@@ -36,6 +37,7 @@
 #include "motor_driver.h"
 #include "motor_config.h"
 #include "speed_power.h"
+#include "vofa.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -101,7 +103,7 @@ int main(void)
 
   /* USER CODE BEGIN SysInit */
   /* GPIO 初始化先把 PA3/DRV_EN 写低。外设配置完成后，
-   * MotorControl_Init() 准备 PWM、ADC DMA 和 TIM3，再等待、校准并启动控制。
+   * MotorControl_Init() 准备PWM、ADC零电流标定和TIM3；随后读取角度、加载历史标定并启动控制。
    */
   /* USER CODE END SysInit */
 
@@ -116,7 +118,7 @@ int main(void)
   /* USER CODE BEGIN 2 */
   live_core_clock_hz = HAL_RCC_GetHCLKFreq();
   /* 闭环状态先清零，再启动原有 PWM/采样/1ms 定时调度。
-   * 闭环先校准方向和零点，随后持续运行；旧开环仍保持原来的短时流程。 */
+   * 闭环加载已保存的方向和零点后持续运行；旧开环仍保持原来的短时流程。 */
 #if MOTOR_USE_SPEED_LOOP
   SpeedPower_Init();
 #endif
@@ -132,6 +134,7 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+    Vofa_Poll(); /* 非阻塞启动USART1 DMA，发送电流环已保存的Iq/Id。 */
     /* I2C 只在这里执行。闭环减少主循环等待，给 TIM3 提供更及时的角度。 */
 #if MOTOR_USE_SPEED_LOOP
     SpeedPower_PollSensor();

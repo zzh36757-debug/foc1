@@ -21,5 +21,7 @@ extern volatile uint32_t live_as5600_magnitude; /* 芯片内部磁场幅度码�
 extern volatile uint32_t live_as5600_hal_status;/* 0成功、1错误、2忙、3超时。 */
 extern volatile uint32_t live_as5600_i2c_error; /* HAL I2C 错误位；正常为 0。 */
 extern volatile uint32_t live_as5600_read_count;/* 完整读取成功的次数，磁场异常时也会增加。 */
+extern volatile uint32_t live_as5600_angle_tick_ms; /* 角度两个字节读取完成时刻。 */
+extern volatile uint32_t live_as5600_angle_cycles;  /* 同一时刻的 DWT 计数，供换相延迟补偿。 */
 
 #endif

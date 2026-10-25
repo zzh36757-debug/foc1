@@ -25,6 +25,8 @@
  * TIM2：三通道 PWM 硬件发生器，PA0/PA1/PA2 接 DRV8313 的 IN1/IN2/IN3。
  *       motor_driver.c 更新它的 CCR 占空比，硬件负责持续输出 20kHz 波形。
  * TIM3：控制程序的定时闹钟，每 1ms 产生一次中断，通知软件更新电机指令。
+ * TIM2 内部 CH4/TIM4 另由 current_sense.c 配置，给 ADC 提供 2kHz 同步触发。
+ * CH4 不配置 PA3 引脚，PA3 保持 GPIO 驱动使能；TIM4 不输出 GPIO、不进中断。
  *
  * 时钟来源：APB1 总线为 36MHz，且 APB1 预分频不为 1，定时器时钟自动乘 2，
  * 所以 TIM2/TIM3 的计数时钟输入都是 72MHz。
@@ -179,7 +181,7 @@ void HAL_TIM_Base_MspInit(TIM_HandleTypeDef* tim_baseHandle)
     __HAL_RCC_TIM3_CLK_ENABLE();
 
     /* TIM3 interrupt Init */
-    HAL_NVIC_SetPriority(TIM3_IRQn, 0, 0);
+    HAL_NVIC_SetPriority(TIM3_IRQn, 1, 0);
     HAL_NVIC_EnableIRQ(TIM3_IRQn);
   /* USER CODE BEGIN TIM3_MspInit 1 */
 

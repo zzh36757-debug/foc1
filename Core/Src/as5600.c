@@ -26,6 +26,8 @@ volatile uint32_t live_as5600_magnitude = 0;
 volatile uint32_t live_as5600_hal_status = HAL_ERROR;
 volatile uint32_t live_as5600_i2c_error = 0;
 volatile uint32_t live_as5600_read_count = 0;
+volatile uint32_t live_as5600_angle_tick_ms = 0;
+volatile uint32_t live_as5600_angle_cycles = 0;
 
 void AS5600_Update(void)
 {
@@ -60,6 +62,10 @@ void AS5600_Update(void)
     return;
   }
 
+  /* 记录角度读取时刻；后续诊断寄存器读取用时不能算成角度的新鲜时间。 */
+  uint32_t angle_cycles = DWT->CYCCNT;
+  uint32_t angle_tick_ms = HAL_GetTick();
+
   /* 第三步：从 0x1A 连续读 3 字节：AGC、MAGNITUDE 高字节、MAGNITUDE 低字节。
    * 用来排查“角度能变化，但 STATUS=0”的情况，不根据这两个值强行放行 valid。
    * AGC 是自动增益：3.3V 模式范围 0~128，5V 模式为 0~255。
@@ -82,6 +88,8 @@ void AS5600_Update(void)
    */
   uint32_t raw = ((uint32_t)(angle_bytes[0] & 0x0FU) << 8) | angle_bytes[1];
   live_as5600_raw = raw;
+  live_as5600_angle_tick_ms = angle_tick_ms;
+  live_as5600_angle_cycles = angle_cycles;
   live_as5600_angle_deg = (float)raw * (360.0f / 4096.0f);
   live_as5600_status = status;
   live_as5600_agc = field_bytes[0];

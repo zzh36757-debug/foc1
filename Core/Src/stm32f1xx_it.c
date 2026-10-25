@@ -23,6 +23,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "motor_control.h"
+#include "usart.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -59,6 +60,7 @@
 extern DMA_HandleTypeDef hdma_adc1;
 extern TIM_HandleTypeDef htim3;
 /* USER CODE BEGIN EV */
+extern DMA_HandleTypeDef hdma_usart1_tx;
 
 /* USER CODE END EV */
 
@@ -206,9 +208,8 @@ void SysTick_Handler(void)
 void DMA1_Channel1_IRQHandler(void)
 {
   /* USER CODE BEGIN DMA1_Channel1_IRQn 0 */
-  /* 这是 DMA 的硬件中断入口。HAL 负责解析标志、分发对应回调。
-   * 本版在 current_sense.c 中关闭了 DMA 半满/全满通知，采样依旧由 DMA 持续搬运。
-   * 电机的 1ms 控制更新走下方 TIM3 中断，不在这个 DMA 中断中安排。 */
+  /* HAL 分发半满/全满回调。每一半恰好是一组 V/W，2kHz 执行电流内环。
+   * DMA 优先级 0，高于 TIM3 的 1；采样/控制回调内不等待 I2C。 */
   /* USER CODE END DMA1_Channel1_IRQn 0 */
   HAL_DMA_IRQHandler(&hdma_adc1);
   /* USER CODE BEGIN DMA1_Channel1_IRQn 1 */
@@ -231,6 +232,16 @@ void TIM3_IRQHandler(void)
   /* USER CODE BEGIN TIM3_IRQn 1 */
 
   /* USER CODE END TIM3_IRQn 1 */
+}
+
+void DMA1_Channel4_IRQHandler(void)
+{
+  HAL_DMA_IRQHandler(&hdma_usart1_tx);
+}
+
+void USART1_IRQHandler(void)
+{
+  HAL_UART_IRQHandler(&huart1);
 }
 
 /* USER CODE BEGIN 1 */

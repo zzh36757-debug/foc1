@@ -25,7 +25,7 @@
  * 电机相线电流 -> 0.01 欧采样电阻 -> INA240A2（50 倍）-> ADC 引脚。
  * PA4/ADC1_IN4 读取 V 相放大器输出，PA5/ADC1_IN5 读取 W 相；U 相由电流和为零推算。
  * 两个放大器零电流时输出约 1.65V；采到的是放大器电压，不是直接采 U/V/W 功率 PWM。
- * 当前采用连续扫描 + DMA，current_sense.c 每 1ms 读平均值；正式 FOC 电流环还需设计同步采样。
+ * 当前采用 PWM 同步触发的两通道扫描 + DMA，每 500us 得到一组 V/W 电流反馈。
  */
 /* USER CODE END 0 */
 
@@ -43,10 +43,10 @@ void MX_ADC1_Init(void)
   ADC_ChannelConfTypeDef sConfig = {0};
 
   /* USER CODE BEGIN ADC1_Init 1 */
-  /* ScanConvMode：一轮采多个通道；ContinuousConvMode：一轮完成后继续下一轮。
+  /* ScanConvMode：一轮采多个通道；ContinuousConvMode=DISABLE：采完等待下一次触发。
    * NbrOfConversion=2：每轮两次转换；Rank 指本轮的先后位置，不是引脚编号。
-   * Rank1=Channel4/PA4/V，Rank2=Channel5/PA5/W，所以 DMA 缓冲区是 V,W,V,W,...。
-   * ADC_SOFTWARE_START 表示软件启动；本版没有用 TIM2 触发 ADC。
+   * Rank1=Channel4/PA4/V，Rank2=Channel5/PA5/W；DMA 四项是 V,W,V,W。
+   * TIM2 内部 CH4 -> TIM4 分频 -> TIM4_CC4 触发，具体时序在 current_sense.c。
    * ADC 时钟由 PCLK2=72MHz 除以 6 得到 12MHz，12 位数据右对齐后为 0~4095。
    */
   /* USER CODE END ADC1_Init 1 */
@@ -55,9 +55,9 @@ void MX_ADC1_Init(void)
   */
   hadc1.Instance = ADC1;
   hadc1.Init.ScanConvMode = ADC_SCAN_ENABLE;
-  hadc1.Init.ContinuousConvMode = ENABLE;
+  hadc1.Init.ContinuousConvMode = DISABLE;
   hadc1.Init.DiscontinuousConvMode = DISABLE;
-  hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
+  hadc1.Init.ExternalTrigConv = ADC_EXTERNALTRIGCONV_T4_CC4;
   hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
   hadc1.Init.NbrOfConversion = 2;
   if (HAL_ADC_Init(&hadc1) != HAL_OK)
@@ -69,7 +69,7 @@ void MX_ADC1_Init(void)
   */
   sConfig.Channel = ADC_CHANNEL_4;
   sConfig.Rank = ADC_REGULAR_RANK_1;
-  sConfig.SamplingTime = ADC_SAMPLETIME_28CYCLES_5;
+  sConfig.SamplingTime = ADC_SAMPLETIME_13CYCLES_5;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
     Error_Handler();
@@ -84,10 +84,9 @@ void MX_ADC1_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN ADC1_Init 2 */
-  /* 两个通道都使用 28.5 周期采样时间，加上约 12.5 周期转换时间，
-   * 每个结果约需 41/12MHz=3.42us。一对 V/W 顺序转换，时间相差约一次转换。
-   * current_sense.c 的 64 项缓冲区每填满一轮约 64*3.42us=0.22ms。
-   * 这里只配置 ADC；current_sense.c 中校准并调用 HAL_ADC_Start_DMA() 后才开始取数据。
+  /* 13.5 周期采样 + 12.5 周期转换：26/12MHz=2.17us，一对约 4.33us。
+   * V/W 是顺序转换，相差约 2.17us，不是同时采样。触发频率 2kHz。
+   * current_sense.c 校准、启动 DMA 后，再启用 TIM4 触发链路。
    */
   /* USER CODE END ADC1_Init 2 */
 
@@ -129,7 +128,7 @@ void HAL_ADC_MspInit(ADC_HandleTypeDef* adcHandle)
     hdma_adc1.Init.PeriphDataAlignment = DMA_PDATAALIGN_HALFWORD;
     hdma_adc1.Init.MemDataAlignment = DMA_MDATAALIGN_HALFWORD;
     hdma_adc1.Init.Mode = DMA_CIRCULAR;
-    hdma_adc1.Init.Priority = DMA_PRIORITY_LOW;
+    hdma_adc1.Init.Priority = DMA_PRIORITY_HIGH;
     if (HAL_DMA_Init(&hdma_adc1) != HAL_OK)
     {
       Error_Handler();

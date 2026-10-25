@@ -3,19 +3,20 @@
 
 /*
  * 这个文件只做“指令方向 -> 三路 PWM 比较值”的数学换算，不操作外设寄存器。
- * motor_control.c 取得 compare[0/1/2] 后，调用 MotorDriver_SetPwm() 写入 TIM2，才会改变实际引脚波形。
+ * motor_control.c 的电流回调取得 compare[0/1/2] 后，写入 TIM2 才改变实际引脚波形。
  *
  * 两个输入描述一个电压矢量：
  * - angle_rad：它在定子平面内指向哪里（电角度，rad）。
- * - vector_volts：矢量有多长（电压幅值，V），本次为 0.3V。
+ * - vector_volts：电压幅值，V；该入口保留给启动定位/旧开环。
+ * 电流环通过 AlphaBeta 入口输入完整逆 Park 的结果。
  * 角度连续推进时，合成磁场方向随之变化；转子能否跟随还取决于电流、负载等。
  * 本函数不读取转子位置，也不保证电机实际转过了指定角度。
  *
  * 所用 SVPWM 方法：先算三相电压，再给三相加上相同的公共偏置，居中放进母线范围。
  * 三相同加一个数，不改变任意两相之间的差，因此保留电机所需的线电压。
  */
-bool MotorPwmCalculate(float angle_rad, float vector_volts, float bus_volts,
-                       uint16_t period, uint16_t compare[3])
+bool MotorPwmCalculateAlphaBeta(float alpha, float beta, float bus_volts,
+                                uint16_t period, uint16_t compare[3])
 {
   /* 必须有可写的输出数组。先填中性值，后面若发现非法参数，会返回 false。
    * 调用者看到 false 后关闭驱动；仅把比较值设成 50% 不能替代关闭使能。 */
@@ -24,18 +25,15 @@ bool MotorPwmCalculate(float angle_rad, float vector_volts, float bus_volts,
   /* isfinite() 排除 NaN/无穷大，防止非法浮点数进入定时器比较值。
    * 0.57735 = 1/sqrt(3)：按这里矢量幅值的定义，这是 SVPWM 线性区上限，
    * 满足此限制时，各个电角度的三相指令都能放在 0~bus_volts 的范围内。 */
-  if (period == 0U || !isfinite(angle_rad) || !isfinite(vector_volts) ||
-      !isfinite(bus_volts) || bus_volts <= 0.0f || vector_volts < 0.0f ||
-      vector_volts > bus_volts * 0.57735026919f)
+  float magnitude_sq = alpha * alpha + beta * beta;
+  if (period == 0U || !isfinite(alpha) || !isfinite(beta) ||
+      !isfinite(bus_volts) || bus_volts <= 0.0f || !isfinite(magnitude_sq) ||
+      magnitude_sq > bus_volts * bus_volts * (1.000001f / 3.0f))
   {
     return false;
   }
 
-  /* 第一步：把“长度 + 角度”投影到静止的 alpha/beta 两个垂直坐标轴。
-   * 就像用 x=r*cos(theta)、y=r*sin(theta) 描述平面上的一个箭头。
-   * 这些是目标电压分量；它们不是从三相电流测出来的 Clarke/Park 变换结果。 */
-  float alpha = vector_volts * cosf(angle_rad);
-  float beta = vector_volts * sinf(angle_rad);
+  /* alpha/beta 已由开环投影或电流环逆 Park 得到；下面共用同一份调制算法。 */
   /* 第二步：逆 Clarke 变换，求三个相差 120 电角度的相电压指令。
    * U = alpha；V = -alpha/2 + sqrt(3)*beta/2；W = -alpha/2 - sqrt(3)*beta/2。
    * phase[0/1/2] 分别是 U/V/W，相对电机浮动中性点的目标平均电压，三者之和为 0。
@@ -79,7 +77,21 @@ bool MotorPwmCalculate(float angle_rad, float vector_volts, float bus_volts,
    * phase=[0.30,-0.15,-0.15]V；common=-0.075V；
    * compare 约为 [934,866,866]，占空比约 [51.9%,48.1%,48.1%]。
    * 改变 angle 会改变三个比较值的组合，保持 angle 则保持同一个指令方向。
-   * 在定位升幅、旋转和减速阶段，本函数约每 1ms 被调用；20kHz 载波由 TIM2 硬件产生。
+   * 启动/旧开环每 1ms 更新；运行电流环每 500us 更新，20kHz 载波由 TIM2 硬件产生。
    */
   return true;
+}
+
+bool MotorPwmCalculate(float angle_rad, float vector_volts, float bus_volts,
+                       uint16_t period, uint16_t compare[3])
+{
+  if (!compare) { return false; }
+  compare[0] = compare[1] = compare[2] = period / 2U;
+  if (!isfinite(angle_rad) || !isfinite(vector_volts) || vector_volts < 0.0f ||
+      !isfinite(bus_volts) || bus_volts <= 0.0f ||
+      vector_volts > bus_volts * 0.57735026919f) { return false; }
+  /* 保留启动定位和旧开环使用的“角度+幅值”入口。 */
+  return MotorPwmCalculateAlphaBeta(vector_volts * cosf(angle_rad),
+                                    vector_volts * sinf(angle_rad), bus_volts,
+                                    period, compare);
 }
