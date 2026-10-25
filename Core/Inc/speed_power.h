@@ -5,7 +5,7 @@
 #include <stdbool.h>
 
 /* 启动加载motor_config.h中的实测方向/零点，不定位/扫角；测速/速度算法在本模块。
- * 固定Iq与测试时长在current_control.c。 */
+ * position_control.c在本模块内接入位置外环；固定Iq与测试时长在current_control.c。 */
 void SpeedPower_Init(void);        /* 在 MotorControl_Init() 前调用一次。 */
 void SpeedPower_PollSensor(void);  /* 主循环调用，I2C 读取不能放进 TIM3 中断。 */
 void SpeedPower_Update1ms(void);   /* 由 MotorControl_Update1ms() 转发，不能再单独调用。 */
@@ -13,9 +13,9 @@ void SpeedPower_ResetOutput(void); /* 停机时清速度积分和已发布的电
 bool SpeedPower_GetCurrentCommand(uint32_t now_cycles, float *angle_rad, float *iq_a);
 
 /* 可在 Live Watch 中观察；目标、P、I 和 run 也可在运行时修改。 */
-extern volatile float speed_target_rpm;          /* mode=1的诊断目标100rpm；mode=0不使用此目标。 */
-extern volatile float speed_kp;                  /* A/rpm，本轮0.001，减弱外环以观察电流跟踪。 */
-extern volatile float speed_ki;                  /* A/(rpm*s)，本轮0；重新启动清除旧积分。 */
+extern volatile float speed_target_rpm;          /* current_mode=1且position_enabled=0时的速度目标。 */
+extern volatile float speed_kp;                  /* A/rpm，速度比例增益。 */
+extern volatile float speed_ki;                  /* A/(rpm*s)，速度积分增益。 */
 extern volatile uint32_t speed_run;              /* 1=运行；写 0 停机，重新启动需复位。 */
 extern volatile float speed_command_rpm;         /* 经过加减速限制的实际速度指令。 */
 extern volatile float speed_measured_rpm;        /* 编码器测得并滤波后的机械转速。 */

@@ -4,13 +4,15 @@
 #include "motor_control.h"
 #include "motor_driver.h"
 #include "current_control.h"
+#include "position_control.h"
 #include "main.h"
 #include <math.h>
 
 /* 速度闭环的主要阅读顺序：
  * 1. PollSensor() 读取角度；Update1ms() 用角度变化量算实际转速。
  * 2. 等待100ms取得新鲜角度，加载本电机已保存的方向/零点，直接进入闭环。
- * 3. 进入SPEED状态：mode=0给固定Iq（时长0则持续）；mode=1由速度PI给Iq；电流环负责PWM。
+ * 3. 进入SPEED状态：mode=0固定Iq；mode=1由速度PI给Iq，电流环负责PWM。
+ *    mode=1且position_enabled=1时，由position_control.c计算速度目标，构成三环。
  *
  * 负载变重 -> 转速下降 -> PI 提高目标 Iq -> 电流环建立电流 -> 增加扭矩。
  * 电流算法集中在 current_control.c；电流环执行与 PWM 写入由 motor_control.c 调度。
@@ -20,8 +22,8 @@
 /* ===== 初次调试主要看这里；旧开环的 100Hz 不再决定闭环速度 ===== */
 #define SPEED_POLE_PAIRS          7U      /* 已知电机为 7 对极。 */
 #define SPEED_DEFAULT_RPM        300.0f    /* 临时低速诊断目标，非额外最高转速限制。 */
-#define SPEED_DEFAULT_KP          0.003f   /* A/rpm：100rpm误差请求0.1A，减弱外环以观察电流跟踪。 */
-#define SPEED_DEFAULT_KI          0.0005f     /* 本轮先关闭速度积分；重启清掉旧积分后再观察。 */
+#define SPEED_DEFAULT_KP          0.003f   /* A/rpm：保留用户已调的速度比例增益。 */
+#define SPEED_DEFAULT_KI          0.0005f  /* A/(rpm*s)：保留用户已调的速度积分增益。 */
 #define SPEED_UQ_LIMIT_VOLTS      MOTOR_TEST_VECTOR_VOLTS /* 3.80V 总电压预算。 */
 #define SPEED_SENSOR_SETTLE_MS    100U    /* 驱动关闭，先取得有效角度。 */
 #define SPEED_SENSOR_TIMEOUT_MS   5500U    /* 不能拿很久以前的角度继续换相。 */
@@ -63,6 +65,7 @@ static uint32_t step_ms, pi_ms;
 static int32_t velocity_counts;
 static float integral_amps;
 static bool have_sample;
+static uint32_t previous_position_mode;
 
 /* TIM3 发布、DMA 快速环读取。发布时短暂关中断，避免目标/角度来自不同轮。 */
 typedef struct
@@ -94,6 +97,8 @@ void SpeedPower_Init(void)
   velocity_counts = 0;
   integral_amps = 0.0f;
   have_sample = false;
+  previous_position_mode = 0;
+  Position_Control_Init();
   speed_command_rpm = speed_measured_rpm = speed_error_rpm = speed_uq_volts = 0.0f;
   speed_requested_uq_volts = 0.0f;
   speed_iq_target_a = 0.0f;
@@ -148,6 +153,7 @@ void SpeedPower_Update1ms(void)
   /* ===== A. 测速：单圈角度差先处理 0/4095 回绕，再按实际间隔换成 rpm ===== */
   if (sample.valid && sample.sequence != seen_sequence)
   {
+    Position_Control_OnSample(sample.raw);
     if (have_sample)
     {
       int32_t delta = (int32_t)sample.raw - (int32_t)previous_raw;
@@ -218,6 +224,7 @@ void SpeedPower_Update1ms(void)
       velocity_start_ms = sample.tick_ms;
       pi_ms = step_ms = 0;
       CurrentControl_Reset();
+      Position_Control_Start(sample.raw, direction); /* 发布绝对角，同时记录相对模式的启动0度。 */
       MotorDriver_SetPwm(MOTOR_TEST_NEUTRAL_CCR, MOTOR_TEST_NEUTRAL_CCR, MOTOR_TEST_NEUTRAL_CCR);
       current_command = (SpeedCurrentCommand){0.0f, angle,
           speed_measured_rpm * (MOTOR_TEST_TWO_PI / 60.0f) * SPEED_POLE_PAIRS,
@@ -229,7 +236,7 @@ void SpeedPower_Update1ms(void)
   }
   else if (motor_test_state == MOTOR_STATE_SPEED)
   {
-    /* ===== C. 每 1ms 速度 PI -> 目标 Iq；current_mode=0 可单独验证电流跟踪 ===== */
+    /* ===== C. 每1ms：可选位置P -> 速度PI -> 目标Iq；mode=0仍为固定电流测试 ===== */
     if (++pi_ms >= SPEED_PI_PERIOD_MS)
     {
       pi_ms = 0;
@@ -272,6 +279,20 @@ void SpeedPower_Update1ms(void)
       else
       {
         float target = speed_target_rpm;
+        uint32_t position_mode = position_enabled;
+        if (position_mode > 1U ||
+            (position_mode && !Position_Control_Update(&target)))
+        {
+          MotorControl_Stop(MOTOR_FAULT_CONFIG);
+          return;
+        }
+        /* 0=原速度，1=相对位置，2=绝对位置；换坐标目标时同样清旧速度积分。 */
+        uint32_t position_source = position_mode ? position_reference_mode + 1U : 0U;
+        if (position_source != previous_position_mode)
+        {
+          next_integral = 0.0f; /* 切换控制目标来源时不沿用旧速度积分。 */
+          previous_position_mode = position_source;
+        }
         float kp = speed_kp;
         float ki = speed_ki;
         if (!isfinite(target) || !isfinite(kp) || !isfinite(ki) || kp < 0.0f || ki < 0.0f)
@@ -279,9 +300,17 @@ void SpeedPower_Update1ms(void)
           MotorControl_Stop(MOTOR_FAULT_CONFIG);
           return;
         }
-        /* 双环模式：指令斜坡和原来的速度PI仍按1ms计算，不额外限制目标转速。 */
-        float ramp = SPEED_ACCEL_RPM_PER_S * dt;
-        speed_command_rpm += Clamp(target - speed_command_rpm, -ramp, ramp);
+        if (position_mode)
+        {
+          /* 位置P输出本身随剩余距离减小；直接交速度环，避免原加速斜坡延迟制动。
+           * position_speed_limit_rpm只限制位置模式；原速度模式仍使用原斜坡。 */
+          speed_command_rpm = target;
+        }
+        else
+        {
+          float ramp = SPEED_ACCEL_RPM_PER_S * dt;
+          speed_command_rpm += Clamp(target - speed_command_rpm, -ramp, ramp);
+        }
         speed_error_rpm = speed_command_rpm - speed_measured_rpm;
         float proposed_i = next_integral + ki * speed_error_rpm * dt;
         float proposed_iq = kp * speed_error_rpm + proposed_i;
@@ -321,6 +350,7 @@ void SpeedPower_Update1ms(void)
 
 void SpeedPower_ResetOutput(void)
 {
+  Position_Control_Stop();
   integral_amps = 0.0f;
   current_command.valid = 0;
   speed_iq_target_a = speed_requested_uq_volts = speed_uq_volts = 0.0f;

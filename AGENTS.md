@@ -1,5 +1,38 @@
 # 工程维护记录
 
+- 2026-10-25 用户要求关闭故障4使能位保护：motor_config.h新增MOTOR_CHECK_DRV_ENABLE=0，
+  motor_control.c仅条件编译PA3输出使能检查；设1可恢复。过流/ADC/编码器/时序保护均保留。
+  未修改调试暂停清PA3钩子，不自动重新使能驱动；关闭故障4不代表暂停继续后电机自动恢复。
+  仅源码配置修改，未下载、复位、启动或在线改参。
+
+- 2026-10-25 用户明确要求AS5600单圈绝对位置，并把绝对/相对分开。
+  position_control.c/h新增position_reference_mode：默认1绝对，0相对；position_enabled仍为位置环总开关。
+  原position_target_deg/position_measured_deg已拆为position_absolute_target_deg/measured_deg和
+  position_relative_target_deg/measured_deg四个变量，不再使用原模糊名称。
+  绝对反馈raw*360/4096，与AS5600刻度一致；目标0~360（360等同0），误差取[-180,180)，180度平局选减小方向。
+  绝对误差经sensor_direction转换到原速度坐标；相对累计已有方向转换，不能再次取反。
+  相对模式仍以使能前轴位置为0、多圈累计不跨断电；两个目标各自保留，切换不重新归零。
+  默认绝对目标0度，因此启动后会向AS5600的0度移动，不再默认保持任意启动位置。
+  speed_power切换速度/相对/绝对来源均清旧速度积分；位置P7、上限200rpm、容差0.2及现有速度电流PI/保护未改。
+  ARM Debug编译、真实speed/position模块主机测试通过；未下载、复位、启动或改板上参数。
+  备份测试D:/PCB/position-absolute-20261025/，说明POSITION_CONTROL.md；本条覆盖旧默认相对模式说明。
+
+- 2026-10-25 用户把位置文件改为position_control.c/h，函数统一改为Position_Control_前缀，
+  同步speed_power/main头文件、调用、CMake及说明。保留用户新设的位置速度上限200rpm与全部控制参数。
+  ARM Debug编译通过；仅命名整理，未烧录或操作实物。
+
+- 2026-10-25 用户要求独立position_control.c位置环。新增position_control.c/h，
+  AS5600多圈机械角累计+位置P输出rpm，经现有speed_power速度PI给Iq，再由原电流PI给PWM。
+  position_enabled默认1、目标0度（保持本次使能前轴位置）、Kp0.25rpm/deg、速度指令上限60rpm、容差0.2度。
+  需current_mode=1；position_enabled=0恢复原速度模式及120rpm/s斜坡，current_mode=0仍为固定Iq。
+  位置模式速度目标直接进入速度PI，不叠原速度斜坡，避免延迟制动；切换位置/速度模式清速度积分。
+  默认机械零点每次启动建立，与motor_config.h电角度标定零点不同；多圈计数不跨断电保存。
+  保留用户当前速度300rpm/Kp0.003/Ki0.0005、电流d0.20/100、q3.40/150、Iq限3.5A、3.8V、3500mA保护。
+  main只增加头文件/说明，初始化及1ms接线集中在speed_power.c；ADC/DMA、电流算法、PWM和下载配置未改。
+  ARM编译和实际speed/position模块主机测试通过（含回绕、双向多圈、原模式、限幅、故障/停机）。
+  未烧录、复位或启动实物，不能把软件理想速度模型当作实物定位效果/完成整定。
+  说明见POSITION_CONTROL.md，备份和主机测试：D:/PCB/position-loop-20261025/。
+
 - 2026-10-25 用户要求试速度+电流双环：默认current_mode由0改为1。
   保留电流d轴0.20/100、q轴3.40/150，外环目标100rpm、Kp0.001、Ki0，可能存在稳态速度误差。
   固定0.10A仅在mode=0生效；当前Iq由速度环给出。保存标定直接启动、限幅和串口均沿用。

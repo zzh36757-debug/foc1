@@ -164,11 +164,13 @@ static bool CheckProtection(void)
   {
     return false;
   }
+#if MOTOR_CHECK_DRV_ENABLE
   if (motor_test_state != MOTOR_STATE_WAIT && !MotorDriver_IsEnabled())
   {
     MotorControl_Stop(MOTOR_FAULT_DISABLED);
     return false;
   }
+#endif
   if (!CurrentSense_CheckSample())
   {
     MotorControl_Stop(MOTOR_FAULT_ADC);

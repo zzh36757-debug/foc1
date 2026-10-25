@@ -27,8 +27,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-/* 当前阶段：AS5600 速度外环 + d/q 电流内环。
- * speed_power.c 每 1ms 给目标 Iq；current_control.c 随 ADC/DMA 每 500us 控制电流。
+/* 当前阶段：position_control.c位置P -> speed_power.c速度PI -> d/q电流PI。
+ * 位置/速度每1ms计算；current_control.c随ADC/DMA每500us控制电流。
  * 主循环读取编码器，避免中断中等待 I2C。
  * motor_config.h 的 MOTOR_USE_SPEED_LOOP=0 可切回原开环试转。
  */
@@ -37,6 +37,7 @@
 #include "motor_driver.h"
 #include "motor_config.h"
 #include "speed_power.h"
+#include "position_control.h"
 #include "vofa.h"
 /* USER CODE END Includes */
 
@@ -118,7 +119,7 @@ int main(void)
   /* USER CODE BEGIN 2 */
   live_core_clock_hz = HAL_RCC_GetHCLKFreq();
   /* 闭环状态先清零，再启动原有 PWM/采样/1ms 定时调度。
-   * 闭环加载已保存的方向和零点后持续运行；旧开环仍保持原来的短时流程。 */
+   * 加载已保存的电角度零点；位置环默认控制AS5600单圈绝对角度，相对模式另记启动零点。 */
 #if MOTOR_USE_SPEED_LOOP
   SpeedPower_Init();
 #endif

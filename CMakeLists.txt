@@ -51,6 +51,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/current_control.c
     Core/Src/motor_control.c
     Core/Src/speed_power.c
+    Core/Src/position_control.c
     Core/Src/motor_driver.c
     Core/Src/motor_pwm.c
     Core/Src/vofa.c
@@ -58,7 +59,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
 
 # F103 无 FPU；只优化控制计算模块，其他文件保持 Debug 的 -O0 和调试信息。
 set_source_files_properties(
-    Core/Src/current_control.c Core/Src/motor_pwm.c Core/Src/speed_power.c
+    Core/Src/current_control.c Core/Src/motor_pwm.c Core/Src/speed_power.c Core/Src/position_control.c
     PROPERTIES COMPILE_OPTIONS "-O2"
 )
 
